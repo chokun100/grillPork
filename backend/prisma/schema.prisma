@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CASHIER
+  READ_ONLY
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  CLEANING
+}
+
+enum BillStatus {
+  OPEN
+  CLOSED
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+}
+
+enum DiscountType {
+  NONE
+  PERCENT
+  AMOUNT
+}
+
+enum PromoType {
+  PERCENT
+  AMOUNT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  username  String?  @unique
+  password  String?
+  role      Role
+  phone     String?
+  email     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeys      ApiKey[]
+  billsOpened  Bill[]   @relation("OpenedBy")
+  billsClosed  Bill[]   @relation("ClosedBy")
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  keyHash   String
+  label     String
+  scopes    String[]
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  @@index([userId])
+}
+
+model Table {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  name         String
+  status       TableStatus @default(AVAILABLE)
+  currentBillId String?     @unique
+  currentBill  Bill?       @relation("CurrentBill", fields: [currentBillId], references: [id])
+  qrSecret     String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  bills Bill[] @relation("TableBills")
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  name          String?
+  phone         String?  @unique
+  loyaltyStamps Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bills Bill[]
+}
+
+model Bill {
+  id                  String        @id @default(cuid())
+  tableId             String
+  table               Table         @relation("TableBills", fields: [tableId], references: [id])
+  openedById          String
+  openedBy            User          @relation("OpenedBy", fields: [openedById], references: [id])
+  closedById          String?
+  closedBy            User?         @relation("ClosedBy", fields: [closedById], references: [id])
+  customerId          String?
+  customer            Customer?     @relation(fields: [customerId], references: [id])
+  status              BillStatus    @default(OPEN)
+  adultCount          Int
+  childCount          Int
+  adultPriceGross     Decimal       @db.Decimal(10,2)
+  discountType        DiscountType  @default(NONE)
+  discountValue       Decimal       @db.Decimal(10,2) @default(0)
+  promoApplied        String?
+  loyaltyFreeApplied  Boolean       @default(false)
+  subtotalGross       Decimal       @db.Decimal(10,2)
+  vatAmount           Decimal       @db.Decimal(10,2)
+  totalGross          Decimal       @db.Decimal(10,2)
+  paidAmount          Decimal       @db.Decimal(10,2) @default(0)
+  paymentMethod       PaymentMethod?
+  openedAt            DateTime      @default(now())
+  closedAt            DateTime?
+  notes               String?
+
+  // Reverse relations
+  currentTable Table? @relation("CurrentBill")
+
+  @@index([tableId])
+  @@index([status])
+}
+
+model Promotion {
+  id         String     @id @default(cuid())
+  key        String     @unique
+  name       String
+  type       PromoType
+  value      Decimal    @db.Decimal(10,2)
+  daysOfWeek String[]
+  active     Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Settings {
+  id            String   @id @default("singleton")
+  adultPriceGross Decimal @db.Decimal(10,2)
+  currency      String
+  vatIncluded   Boolean  @default(true)
+  vatRate       Decimal  @db.Decimal(4,4) @default(0.07)
+  roundingMode  String
+  locales       String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
