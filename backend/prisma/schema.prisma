@@ -43,8 +43,8 @@ enum PromoType {
 model User {
   id        String   @id @default(cuid())
   name      String
-  username  String?  @unique
-  password  String?
+  username  String  @unique
+  password  String
   role      Role
   phone     String?
   email     String?

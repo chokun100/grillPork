@@ -1,5 +1,5 @@
 import prisma from '../lib/db'
-import { hashApiKey, generateApiKey } from '../middleware/auth'
+import { hashApiKey, generateApiKey, hashPassword } from '../middleware/auth'
 import { Decimal } from '@prisma/client/runtime/library'
 
 async function seed() {
@@ -13,11 +13,16 @@ async function seed() {
 
     let adminUserId: string
 
+    const adminUsername = 'admin'
+    const adminPassword = await hashPassword('admin123')
+
     if (!adminUser) {
       // Create admin user
       const newAdmin = await prisma.user.create({
         data: {
           name: 'Admin User',
+          username: adminUsername,
+          password: adminPassword,
           role: 'ADMIN',
           email: 'admin@mookrata.com',
           phone: '0812345678',
@@ -27,8 +32,21 @@ async function seed() {
       adminUserId = newAdmin.id
       console.log('✅ Created admin user')
     } else {
+      // Update existing admin with username and password only if not set
+      const updateAdminData: any = { password: adminPassword }
+      if (!adminUser.username) {
+        updateAdminData.username = adminUsername
+      }
+      await prisma.user.update({
+        where: { id: adminUser.id },
+        data: updateAdminData
+      })
       adminUserId = adminUser.id
-      console.log('ℹ️  Admin user already exists')
+      if (!adminUser.username) {
+        console.log('ℹ️  Updated admin user with credentials')
+      } else {
+        console.log('ℹ️  Admin user already has credentials')
+      }
     }
 
     // Create admin API key
@@ -67,10 +85,15 @@ async function seed() {
       where: { role: 'CASHIER' }
     })
 
+    const cashierUsername = 'cashier'
+    const cashierPassword = await hashPassword('cashier123')
+
     if (!cashierUser) {
       await prisma.user.create({
         data: {
           name: 'Cashier User',
+          username: cashierUsername,
+          password: cashierPassword,
           role: 'CASHIER',
           email: 'cashier@mookrata.com',
           phone: '0812345679',
@@ -79,7 +102,20 @@ async function seed() {
       })
       console.log('✅ Created cashier user')
     } else {
-      console.log('ℹ️  Cashier user already exists')
+      // Update existing cashier with username and password only if not set
+      const updateCashierData: any = { password: cashierPassword }
+      if (!cashierUser.username) {
+        updateCashierData.username = cashierUsername
+      }
+      await prisma.user.update({
+        where: { id: cashierUser.id },
+        data: updateCashierData
+      })
+      if (!cashierUser.username) {
+        console.log('ℹ️  Updated cashier user with credentials')
+      } else {
+        console.log('ℹ️  Cashier user already has credentials')
+      }
     }
 
     // Create weekend promotion
@@ -126,6 +162,10 @@ async function seed() {
     }
 
     console.log('🎉 Database seed completed successfully!')
+    
+    console.log('\n👤 Default login credentials:')
+    console.log('   Admin: username=admin, password=admin123')
+    console.log('   Cashier: username=cashier, password=cashier123')
     
     if (adminApiKey) {
       console.log('\n🔑 Admin API Key (save this - shown only once):')

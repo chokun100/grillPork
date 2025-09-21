@@ -19,7 +19,7 @@ const app = new Hono()
 // Global middleware
 app.use('*', logger())
 app.use('*', cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowHeaders: ['Content-Type', 'Authorization'],
   exposeHeaders: ['Content-Length'],
