@@ -31,7 +31,6 @@ const menuSections = [
     title: "การจัดการ",
     items: [
       { label: "โต๊ะ", href: "/tables", icon: TableCellsIcon },
-      { label: "เปิดโต๊ะ", href: "/table-open", icon: PlusIcon },
       { label: "บิล", href: "/bills", icon: DocumentTextIcon },
       { label: "ลูกค้า", href: "/customers", icon: UsersIcon },
       { label: "โปรโมชั่น", href: "/promotions", icon: TagIcon },

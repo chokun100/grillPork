@@ -199,9 +199,9 @@ export default function TablesPage() {
         const data = await response.json();
         if (data.ok) {
           const settings = data.data;
-          const subtotalGross = adultCount * settings.adultPriceGross;
-          const vatAmount = subtotalGross * (settings.vatRate / 100);
-          const totalGross = subtotalGross + vatAmount;
+          const totalGross = adultCount * settings.adultPriceGross; // Inclusive price
+          const vatAmount = totalGross - (totalGross / (1 + settings.vatRate / 100));
+          const subtotalGross = totalGross; // No separate subtotal, total is inclusive
           
           setPricingPreview({
             adultPriceGross: settings.adultPriceGross,
@@ -342,7 +342,8 @@ export default function TablesPage() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          amount: parseFloat(paymentAmount)
+          amount: parseFloat(paymentAmount),
+          method: 'CASH'
         })
       });
 
@@ -762,16 +763,8 @@ export default function TablesPage() {
                                   {pricingPreview && (
                                     <div className="bg-gray-50 p-3 rounded-lg space-y-2 mb-4">
                                       <div className="flex justify-between">
-                                        <span>ราคาต่อคน:</span>
+                                        <span>ราคาต่อคน (รวม VAT):</span>
                                         <span>{formatCurrency(pricingPreview.adultPriceGross)}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>รวมก่อน VAT:</span>
-                                        <span>{formatCurrency(pricingPreview.subtotalGross)}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>VAT (7%):</span>
-                                        <span>{formatCurrency(pricingPreview.vatAmount)}</span>
                                       </div>
                                       <Divider />
                                       <div className="flex justify-between font-semibold">
@@ -926,16 +919,8 @@ export default function TablesPage() {
                       <div className="bg-blue-50 p-4 rounded-lg space-y-2">
                         <h3 className="font-semibold text-blue-900">สรุปราคา</h3>
                         <div className="flex justify-between">
-                          <span>ราคาต่อคน:</span>
+                          <span>ราคาต่อคน (รวม VAT):</span>
                           <span>{formatCurrency(pricingPreview.adultPriceGross)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>รวมก่อน VAT:</span>
-                          <span>{formatCurrency(pricingPreview.subtotalGross)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>VAT (7%):</span>
-                          <span>{formatCurrency(pricingPreview.vatAmount)}</span>
                         </div>
                         <Divider />
                         <div className="flex justify-between font-semibold text-blue-900">

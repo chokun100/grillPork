@@ -6,10 +6,67 @@ import { Decimal } from '@prisma/client/runtime/library'
 import { calculateBillPricing, calculateWeekendPromotion, getCurrentDayOfWeek } from '../lib/calculations'
 import { validateOpenBillRequest, validatePayCashRequest } from '../lib/validation'
 import { generateTableQRCode } from '../lib/qr'
+import promptpayQR from 'promptpay-qr'
 
 const bills = new Hono()
 
 bills.use('*', errorHandler)
+
+// Get all bills
+bills.get('/',
+  dualAuth,
+  requireScopes(['cashier:read', 'admin:read', 'read-only:read']),
+  async (c) => {
+    try {
+      const bills = await prisma.bill.findMany({
+        include: {
+          table: {
+            select: {
+              code: true,
+              name: true
+            }
+          },
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              loyaltyStamps: true
+            }
+          },
+          openedBy: {
+            select: {
+              id: true,
+              name: true,
+              role: true
+            }
+          },
+          closedBy: {
+            select: {
+              id: true,
+              name: true,
+              role: true
+            }
+          }
+        },
+        orderBy: {
+          openedAt: 'desc'
+        }
+      })
+
+      return c.json({ ok: true, data: bills })
+    } catch (error) {
+      console.error('Get bills error:', error)
+      return c.json({
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to fetch bills'
+        }
+      }, 500)
+    }
+  }
+)
 
 // Get bill by ID
 bills.get('/:id',
@@ -54,24 +111,24 @@ bills.get('/:id',
       })
 
       if (!bill) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NOT_FOUND', 
-            message: 'Bill not found' 
-          } 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Bill not found'
+          }
         }, 404)
       }
 
       return c.json({ ok: true, data: bill })
     } catch (error) {
       console.error('Get bill error:', error)
-      return c.json({ 
-        ok: false, 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: 'Failed to fetch bill' 
-        } 
+      return c.json({
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to fetch bill'
+        }
       }, 500)
     }
   }

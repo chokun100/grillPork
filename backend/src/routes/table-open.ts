@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { validateApiKey, requireScopes } from '../middleware/auth'
+import { validateJwtToken, requireScopes } from '../middleware/auth'
 import { errorHandler } from '../middleware/validation'
 import prisma from '../lib/db'
 import { Decimal } from '@prisma/client/runtime/library'
@@ -9,7 +9,7 @@ import { generateTableQRCode } from '../lib/qr'
 
 const tableOpen = new Hono()
 
-tableOpen.use('*', validateApiKey)
+tableOpen.use('*', validateJwtToken)
 tableOpen.use('*', errorHandler)
 
 // Open a bill for a table
