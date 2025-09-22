@@ -66,7 +66,7 @@ interface Bill {
   vatAmount: number;
   totalGross: number;
   paidAmount: number;
-  paymentMethod?: string;
+  paymentMethod?: "CASH" | "PROMPTPAY";
   notes?: string;
   openedAt: string;
   closedAt?: string;
@@ -120,8 +120,14 @@ export default function TablesPage() {
   // Payment states
   const [paymentAmount, setPaymentAmount] = useState("");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [qrCheckinUrl, setQrCheckinUrl] = useState("");
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
+  const [showCheckinQRModal, setShowCheckinQRModal] = useState(false);
+  const [checkinQRUrl, setCheckinQRUrl] = useState("");
+  const [showPaymentQRModal, setShowPaymentQRModal] = useState(false);
+  const [paymentQRData, setPaymentQRData] = useState<{ qrSvg: string; payload: string; amount: number; target: string } | null>(null);
+  const [promptPayTarget, setPromptPayTarget] = useState<string>('');
+  const [generatingPaymentQR, setGeneratingPaymentQR] = useState(false);
+  const [confirmingPromptPay, setConfirmingPromptPay] = useState(false);
   
   // Modal states
   const { isOpen: isDetailsModalOpen, onOpen: onDetailsModalOpen, onClose: onDetailsModalClose } = useDisclosure();
@@ -182,6 +188,33 @@ export default function TablesPage() {
     }
   };
 
+  // Fetch settings on mount
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/settings`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.ok) {
+          const settings = data.data;
+          setPromptPayTarget(settings.promptPayTarget || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings:', err);
+      }
+    };
+
+    fetchSettings();
+  }, [token]);
+
   // Calculate pricing preview
   useEffect(() => {
     const calculatePricing = async () => {
@@ -200,7 +233,7 @@ export default function TablesPage() {
         if (data.ok) {
           const settings = data.data;
           const totalGross = adultCount * settings.adultPriceGross; // Inclusive price
-          const vatAmount = totalGross - (totalGross / (1 + settings.vatRate / 100));
+          const vatAmount = totalGross - (totalGross / (1 + settings.vatRate));
           const subtotalGross = totalGross; // No separate subtotal, total is inclusive
           
           setPricingPreview({
@@ -218,7 +251,7 @@ export default function TablesPage() {
     if (adultCount > 0) {
       calculatePricing();
     }
-  }, [adultCount, childCount]);
+  }, [adultCount, childCount, token]);
 
   // Handle opening a new bill
   const handleOpenBill = async () => {
@@ -393,6 +426,72 @@ export default function TablesPage() {
     }
   };
 
+  // Handle confirm PromptPay payment
+  const handleConfirmPromptPay = async () => {
+    if (!bill || !paymentQRData) return;
+
+    try {
+      setConfirmingPromptPay(true);
+      const remainingAmount = bill.totalGross - bill.paidAmount;
+      const response = await fetch(`${API_BASE_URL}/bills/${bill.id}/pay`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          amount: remainingAmount,
+          method: 'PROMPTPAY'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.ok) {
+        // Refresh tables data
+        const tablesResponse = await fetch(`${API_BASE_URL}/tables`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (tablesResponse.ok) {
+          const tablesData = await tablesResponse.json();
+          if (tablesData.ok) {
+            setTables(tablesData.data);
+          }
+        }
+        
+        // Refresh bill data
+        const billResponse = await fetch(`${API_BASE_URL}/bills/${bill.id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (billResponse.ok) {
+          const billData = await billResponse.json();
+          if (billData.ok) {
+            setBill(billData.data);
+          }
+        }
+        
+        setShowPaymentQRModal(false);
+        setPaymentQRData(null);
+        alert('บันทึกการชำระเงิน PromptPay สำเร็จ');
+      } else {
+        setError(data.error?.message || 'Failed to process PromptPay payment');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setConfirmingPromptPay(false);
+    }
+  };
+
   // Handle table card click
   const handleTableClick = (table: Table) => {
     setSelectedTable(table);
@@ -408,6 +507,89 @@ export default function TablesPage() {
       if (table.currentBillId) {
         fetchBillDetails(table.currentBillId);
       }
+    }
+  };
+
+  const handleGeneratePaymentQR = async (bill: Bill) => {
+    try {
+      setGeneratingPaymentQR(true);
+      
+      console.log('Starting QR generation...');
+      
+      // Refetch settings to get latest promptPayTarget
+      const settingsResponse = await fetch(`${API_BASE_URL}/settings`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!settingsResponse.ok) {
+        throw new Error(`HTTP error! status: ${settingsResponse.status}`);
+      }
+      
+      const settingsData = await settingsResponse.json();
+      if (!settingsData.ok) {
+        throw new Error(settingsData.error?.message || 'Failed to fetch settings');
+      }
+      
+      const latestTarget = settingsData.data.promptPayTarget || '0812345678';
+      console.log('Latest target from settings:', latestTarget);
+      
+      const promptPayModule = await import('promptpay-qr');
+      const promptPay = promptPayModule.default;
+      console.log('Imported promptPay:', typeof promptPay, promptPay);
+      
+      const qrcodeModule = await import('qrcode');
+      const QRCode: any = qrcodeModule.default;
+      console.log('Imported QRCode:', typeof QRCode, QRCode);
+      
+      // Use latest target
+      const target = latestTarget;
+      console.log('Using target:', target);
+      
+      const amount = bill.totalGross - bill.paidAmount;
+      console.log('Amount to pay:', amount);
+      
+      const payload = promptPay(target, { amount });
+      console.log('Generated payload:', payload, 'Length:', payload ? payload.length : 'null');
+      
+      if (!QRCode || typeof QRCode.toString !== 'function') {
+        throw new Error('QRCode.toString is not available. Check qrcode import.');
+      }
+      
+      console.log('Calling QRCode.toString...');
+      const qrSvg = await new Promise<string>((resolve, reject) => {
+        QRCode.toString(payload, {
+          type: 'svg',
+          width: 256,
+          margin: 2,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF'
+          }
+        }, (err: Error | null, svg: string) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(svg);
+          }
+        });
+      });
+      console.log('Generated QR SVG successfully');
+
+      setPaymentQRData({
+        qrSvg,
+        payload,
+        amount,
+        target
+      });
+      setShowPaymentQRModal(true);
+    } catch (err) {
+      console.error('Full error in handleGeneratePaymentQR:', err);
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack');
+      alert(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setGeneratingPaymentQR(false);
     }
   };
 
@@ -488,6 +670,18 @@ export default function TablesPage() {
         return 'ยกเลิก';
       default:
         return status;
+    }
+  };
+
+  // Get payment method text
+  const getPaymentMethodText = (method?: string) => {
+    switch (method) {
+      case 'CASH':
+        return 'เงินสด';
+      case 'PROMPTPAY':
+        return 'PromptPay';
+      default:
+        return 'ยังไม่ได้ชำระ';
     }
   };
 
@@ -670,7 +864,7 @@ export default function TablesPage() {
                                   </div>
                                 )}
                               </div>
-                              
+
                               <div className="space-y-3">
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">ผู้ใหญ่:</span>
@@ -722,10 +916,7 @@ export default function TablesPage() {
                                   color="success"
                                   variant="flat"
                                   size="sm"
-                                  onClick={() => {
-                                    setPaymentAmount(bill.totalGross.toString());
-                                    setShowPaymentModal(true);
-                                  }}
+                                  onClick={() => setShowPaymentMethodModal(true)}
                                 >
                                   ชำระเงิน
                                 </Button>
@@ -733,57 +924,12 @@ export default function TablesPage() {
                                   color="primary"
                                   variant="flat"
                                   size="sm"
-                                  onClick={() => setShowQRModal(true)}
+                                  onClick={() => setShowCheckinQRModal(true)}
+                                  isLoading={false} // Add loading if needed
                                 >
-                                  QR Code
+                                  QR เช็คอิน
                                 </Button>
                               </div>
-                              
-                              {/* Edit Form */}
-                              {(adultCount !== bill.adultCount || childCount !== bill.childCount) && (
-                                <div className="mt-4 p-4 bg-white rounded-lg border">
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    <Input
-                                      type="number"
-                                      label="จำนวนผู้ใหญ่"
-                                      value={adultCount.toString()}
-                                      onChange={(e) => setAdultCount(parseInt(e.target.value) || 1)}
-                                      min="1"
-                                      size="sm"
-                                    />
-                                    <Input
-                                      type="number"
-                                      label="จำนวนเด็ก"
-                                      value={childCount.toString()}
-                                      onChange={(e) => setChildCount(parseInt(e.target.value) || 0)}
-                                      min="0"
-                                      size="sm"
-                                    />
-                                  </div>
-                                  {pricingPreview && (
-                                    <div className="bg-gray-50 p-3 rounded-lg space-y-2 mb-4">
-                                      <div className="flex justify-between">
-                                        <span>ราคาต่อคน (รวม VAT):</span>
-                                        <span>{formatCurrency(pricingPreview.adultPriceGross)}</span>
-                                      </div>
-                                      <Divider />
-                                      <div className="flex justify-between font-semibold">
-                                        <span>ยอดรวม:</span>
-                                        <span>{formatCurrency(pricingPreview.totalGross)}</span>
-                                      </div>
-                                    </div>
-                                  )}
-                                  <Button
-                                    color="primary"
-                                    onClick={handleUpdateBill}
-                                    isLoading={updatingBill}
-                                    className="w-full"
-                                    size="sm"
-                                  >
-                                    อัปเดตข้อมูล
-                                  </Button>
-                                </div>
-                              )}
                             </div>
                           )}
 
@@ -798,7 +944,7 @@ export default function TablesPage() {
                               <div className="flex justify-between">
                                 <span className="text-gray-600">วิธีการชำระเงิน:</span>
                                 <span className="font-medium">
-                                  {bill.paymentMethod || 'ยังไม่ได้ชำระ'}
+                                  {getPaymentMethodText(bill.paymentMethod)}
                                 </span>
                               </div>
                               <div className="flex justify-between">
@@ -839,18 +985,6 @@ export default function TablesPage() {
                           </Button>
                         </div>
                       )}
-
-                      {/* Timestamps */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-gray-500 block">สร้างเมื่อ:</span>
-                          <span className="font-medium">{formatDate(selectedTable.createdAt)}</span>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-gray-500 block">อัปเดตล่าสุด:</span>
-                          <span className="font-medium">{formatDate(selectedTable.updatedAt)}</span>
-                        </div>
-                      </div>
                     </div>
                   )}
                 </ModalBody>
@@ -1013,8 +1147,64 @@ export default function TablesPage() {
           </ModalContent>
         </Modal>
 
-        {/* QR Code Modal */}
-        <Modal isOpen={showQRModal} onClose={() => setShowQRModal(false)}>
+        {/* Payment Method Selection Modal */}
+        <Modal isOpen={showPaymentMethodModal} onClose={() => setShowPaymentMethodModal(false)}>
+          <ModalContent>
+            {(onClose: () => void) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  เลือกวิธีการชำระเงิน
+                </ModalHeader>
+                <ModalBody>
+                  <div className="space-y-4">
+                    <p className="text-gray-600">กรุณาเลือกวิธีการชำระเงิน</p>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Button
+                        color="success"
+                        variant="flat"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          setShowPaymentMethodModal(false);
+                          if (bill) {
+                            setPaymentAmount((bill.totalGross - bill.paidAmount).toString());
+                            setShowPaymentModal(true);
+                          }
+                        }}
+                      >
+                        เงินสด
+                      </Button>
+                      <Button
+                        color="primary"
+                        variant="flat"
+                        size="sm"
+                        startContent={<QrCodeIcon className="w-4 h-4" />}
+                        className="w-full"
+                        onClick={() => {
+                          setShowPaymentMethodModal(false);
+                          if (bill) {
+                            handleGeneratePaymentQR(bill);
+                          }
+                        }}
+                      >
+                        PromptPay QR
+                      </Button>
+                    </div>
+                  </div>
+                </ModalBody>
+                <ModalFooter>
+                  <Button color="danger" variant="light" onPress={onClose}>
+                    ยกเลิก
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* Check-in QR Modal */}
+        <Modal isOpen={showCheckinQRModal} onClose={() => setShowCheckinQRModal(false)}>
           <ModalContent>
             {(onClose: () => void) => (
               <>
@@ -1030,13 +1220,68 @@ export default function TablesPage() {
                       <QrCodeIcon className="w-32 h-32 mx-auto text-gray-400" />
                     </div>
                     <p className="text-sm text-gray-500 break-all">
-                      {qrCheckinUrl || 'กำลังโหลด...'}
+                      {checkinQRUrl || 'กำลังโหลด...'}
                     </p>
                   </div>
                 </ModalBody>
                 <ModalFooter>
                   <Button color="primary" variant="light" onPress={onClose}>
                     ปิด
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* Payment QR Modal */}
+        <Modal isOpen={showPaymentQRModal} onClose={() => setShowPaymentQRModal(false)}>
+          <ModalContent>
+            {(onClose: () => void) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  PromptPay QR สำหรับชำระเงิน
+                </ModalHeader>
+                <ModalBody>
+                  <div className="space-y-4">
+                    <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                      <div className="flex justify-between">
+                        <span>ยอดชำระ:</span>
+                        <span className="font-semibold">{formatCurrency(paymentQRData?.amount || 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>ชำระเงินไปที่:</span>
+                        <span className="font-medium">{paymentQRData?.target}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="text-center space-y-4">
+                      <p className="text-gray-600">
+                        ให้ลูกค้าสแกน QR Code นี้เพื่อชำระเงินผ่าน PromptPay
+                      </p>
+                      <div className="bg-gray-100 p-4 rounded-lg inline-block max-w-xs mx-auto">
+                        {paymentQRData?.qrSvg && (
+                          <div dangerouslySetInnerHTML={{ __html: paymentQRData.qrSvg }} />
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-500 break-all bg-gray-100 p-2 rounded">
+                        <p className="font-medium mb-1">Payload (สำหรับ copy):</p>
+                        <p>{paymentQRData?.payload || 'กำลังโหลด...'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </ModalBody>
+                <ModalFooter>
+                  <Button color="primary" variant="light" onPress={onClose}>
+                    ปิด
+                  </Button>
+                  <Button
+                    color="success"
+                    onClick={handleConfirmPromptPay}
+                    isLoading={confirmingPromptPay}
+                    isDisabled={!bill || bill.status !== 'OPEN'}
+                  >
+                    ชำระเรียบร้อยแล้ว
                   </Button>
                 </ModalFooter>
               </>

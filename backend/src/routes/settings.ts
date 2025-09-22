@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { Decimal } from '@prisma/client/runtime/library'
 import { dualAuth, requireScopes } from '../middleware/auth'
 import { validateBody, errorHandler, getValidatedBody } from '../middleware/validation'
 import prisma from '../lib/db'
@@ -19,34 +20,35 @@ settings.get('/',
       })
 
       if (!settings) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NOT_FOUND', 
-            message: 'Settings not found' 
-          } 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Settings not found'
+          }
         }, 404)
       }
 
-      return c.json({ 
-        ok: true, 
+      return c.json({
+        ok: true,
         data: {
           adultPriceGross: settings.adultPriceGross,
           currency: settings.currency,
           vatIncluded: settings.vatIncluded,
           vatRate: settings.vatRate,
           roundingMode: settings.roundingMode,
-          locales: settings.locales
+          locales: settings.locales,
+          promptPayTarget: settings.promptPayTarget
         }
       })
     } catch (error) {
       console.error('Get settings error:', error)
-      return c.json({ 
-        ok: false, 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: 'Failed to fetch settings' 
-        } 
+      return c.json({
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to fetch settings'
+        }
       }, 500)
     }
   }
@@ -73,37 +75,39 @@ settings.patch('/',
         }, 400)
       }
 
+      // Prepare update data - only safe fields that exist in schema
+      const updateData: any = {}
+      if (body.adultPriceGross !== undefined && !isNaN(parseFloat(body.adultPriceGross))) {
+        updateData.adultPriceGross = new Decimal(body.adultPriceGross)
+      }
+      if (body.vatRate !== undefined && !isNaN(parseFloat(body.vatRate))) {
+        updateData.vatRate = new Decimal(body.vatRate)
+      }
+      if (body.promptPayTarget !== undefined) {
+        updateData.promptPayTarget = body.promptPayTarget || null
+      }
+
       const settings = await prisma.settings.update({
         where: { id: 'singleton' },
-        data: {
-          adultPriceGross: body.adultPriceGross,
-          currency: body.currency,
-          vatIncluded: body.vatIncluded,
-          vatRate: body.vatRate,
-          roundingMode: body.roundingMode,
-          locales: body.locales
-        }
+        data: updateData
       })
 
-      return c.json({ 
-        ok: true, 
+      return c.json({
+        ok: true,
         data: {
-          adultPriceGross: settings.adultPriceGross,
-          currency: settings.currency,
-          vatIncluded: settings.vatIncluded,
-          vatRate: settings.vatRate,
-          roundingMode: settings.roundingMode,
-          locales: settings.locales
+          adultPriceGross: settings.adultPriceGross.toNumber(),
+          vatRate: settings.vatRate.toNumber(),
+          promptPayTarget: settings.promptPayTarget
         }
       })
     } catch (error) {
       console.error('Update settings error:', error)
-      return c.json({ 
-        ok: false, 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: 'Failed to update settings' 
-        } 
+      return c.json({
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to update settings'
+        }
       }, 500)
     }
   }
@@ -125,7 +129,8 @@ export async function initializeSettings() {
           vatIncluded: true,
           vatRate: 0.07,
           roundingMode: 'NONE',
-          locales: ['th', 'en']
+          locales: ['th', 'en'],
+          promptPayTarget: null
         }
       })
       console.log('Settings initialized with default values')

@@ -4,9 +4,9 @@ import { errorHandler } from '../middleware/validation'
 import prisma from '../lib/db'
 import { Decimal } from '@prisma/client/runtime/library'
 import { calculateBillPricing, calculateWeekendPromotion, getCurrentDayOfWeek } from '../lib/calculations'
-import { validateOpenBillRequest, validatePayCashRequest } from '../lib/validation'
+import { validateOpenBillRequest, validatePayRequest } from '../lib/validation'
 import { generateTableQRCode } from '../lib/qr'
-import promptpayQR from 'promptpay-qr'
+import * as promptpayQR from 'promptpay-qr'
 
 const bills = new Hono()
 
@@ -552,7 +552,7 @@ bills.post('/:id/apply-loyalty',
   }
 )
 
-// Record cash payment and close bill
+// Record payment and close bill
 bills.post('/:id/pay',
   requireScopes(['cashier:*', 'admin:*']),
   async (c) => {
@@ -561,19 +561,19 @@ bills.post('/:id/pay',
       const body = await c.req.json()
       
       // Validate payment request
-      const validation = validatePayCashRequest(body)
+      const validation = validatePayRequest(body)
       if (!validation.isValid) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'VALIDATION_ERROR', 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'VALIDATION_ERROR',
             message: 'Validation failed',
             details: validation.errors
-          } 
+          }
         }, 400)
       }
 
-      const { amount } = body
+      const { amount, method = 'CASH' } = body
 
       // Get current bill
       const bill = await prisma.bill.findUnique({
@@ -585,36 +585,36 @@ bills.post('/:id/pay',
       })
 
       if (!bill) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NOT_FOUND', 
-            message: 'Bill not found' 
-          } 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Bill not found'
+          }
         }, 404)
       }
 
       if (bill.status !== 'OPEN') {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'INVALID_STATE', 
-            message: 'Cannot pay for closed or void bill' 
-          } 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'INVALID_STATE',
+            message: 'Cannot pay for closed or void bill'
+          }
         }, 400)
       }
 
-      if (amount < bill.totalGross.toNumber()) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'INSUFFICIENT_PAYMENT', 
-            message: `Payment amount ${amount} is less than total ${bill.totalGross}` 
-          } 
+      if (method === 'CASH' && amount < bill.totalGross.toNumber()) {
+        return c.json({
+          ok: false,
+          error: {
+            code: 'INSUFFICIENT_PAYMENT',
+            message: `Payment amount ${amount} is less than total ${bill.totalGross}`
+          }
         }, 400)
       }
 
-      const change = new Decimal(amount).sub(bill.totalGross)
+      const change = method === 'CASH' ? new Decimal(amount).sub(bill.totalGross) : new Decimal(0)
 
       // Update bill and table status
       const [updatedBill, updatedTable] = await prisma.$transaction([
@@ -623,20 +623,20 @@ bills.post('/:id/pay',
           data: {
             status: 'CLOSED',
             paidAmount: amount,
-            paymentMethod: 'CASH',
+            paymentMethod: method,
             closedAt: new Date()
           }
         }),
         prisma.table.update({
           where: { id: bill.table.id },
-          data: { 
+          data: {
             status: 'AVAILABLE',
             currentBillId: null
           }
         })
       ])
 
-      // Update customer loyalty stamps if applicable
+      // Update customer loyalty stamps if applicable (for both methods, if full payment)
       if (bill.customer && !bill.loyaltyFreeApplied) {
         await prisma.customer.update({
           where: { id: bill.customer.id },
@@ -647,24 +647,25 @@ bills.post('/:id/pay',
       // Generate print slip URL (placeholder)
       const printSlipUrl = `/api/bills/${billId}/slip`
 
-      return c.json({ 
-        ok: true, 
+      return c.json({
+        ok: true,
         data: {
           status: 'CLOSED',
           change: change,
           paidAmount: amount,
           totalAmount: bill.totalGross,
+          method: method,
           printSlipUrl
         }
       })
     } catch (error) {
       console.error('Process payment error:', error)
-      return c.json({ 
-        ok: false, 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: 'Failed to process payment' 
-        } 
+      return c.json({
+        ok: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to process payment'
+        }
       }, 500)
     }
   }

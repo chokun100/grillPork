@@ -136,6 +136,8 @@ model Promotion {
   name       String
   type       PromoType
   value      Decimal    @db.Decimal(10,2)
+  expiresAt  DateTime?
+  conditions Json?
   daysOfWeek String[]
   active     Boolean    @default(true)
   createdAt  DateTime   @default(now())
@@ -150,6 +152,7 @@ model Settings {
   vatRate       Decimal  @db.Decimal(4,4) @default(0.07)
   roundingMode  String
   locales       String[]
+  promptPayTarget String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

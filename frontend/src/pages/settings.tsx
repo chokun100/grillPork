@@ -43,8 +43,7 @@ interface Settings {
   vatRate: number;
   roundingMode: string;
   locales: string[];
-  promptPayPhone?: string;
-  promptPayId?: string;
+  promptPayTarget?: string;
 }
 
 interface UserFormData {
@@ -111,7 +110,28 @@ export default function SettingsPage() {
   }, [token]);
 
   const handleSettingsChange = (key: keyof Settings, value: any) => {
-    setSettings((prev) => prev ? { ...prev, [key]: value } : null);
+    setSettings((prev) => {
+      if (!prev) return null;
+      
+      // For numeric fields, validate before updating
+      if (key === 'adultPriceGross' || key === 'vatRate') {
+        if (value === '' || value === undefined || value === null) {
+          return prev; // Keep existing value if empty
+        }
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0) {
+          return prev; // Keep existing if invalid
+        }
+        return { ...prev, [key]: numValue };
+      }
+      
+      // For string fields like promptPayTarget, allow empty but keep existing if not changed
+      if (key === 'promptPayTarget' && value === '') {
+        return prev; // Keep existing if cleared
+      }
+      
+      return { ...prev, [key]: value };
+    });
   };
 
   const handleSaveSettings = async () => {
@@ -119,22 +139,20 @@ export default function SettingsPage() {
 
     try {
       setSaving(true);
+      // Prepare data to send - only backend supported fields
+      const updateData = {
+        adultPriceGross: settings.adultPriceGross,
+        vatRate: settings.vatRate,
+        promptPayTarget: settings.promptPayTarget || null,
+      };
+
       const response = await fetch(`${API_BASE_URL}/settings`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          adultPriceGross: settings.adultPriceGross,
-          currency: settings.currency,
-          vatIncluded: settings.vatIncluded,
-          vatRate: settings.vatRate,
-          roundingMode: settings.roundingMode,
-          locales: settings.locales,
-          promptPayPhone: settings.promptPayPhone,
-          promptPayId: settings.promptPayId,
-        }),
+        body: JSON.stringify(updateData),
       });
 
       if (!response.ok) {
@@ -153,7 +171,12 @@ export default function SettingsPage() {
         if (refreshResponse.ok) {
           const refreshData = await refreshResponse.json();
           if (refreshData.ok) {
-            setSettings(refreshData.data);
+            setSettings({
+              ...settings,
+              adultPriceGross: refreshData.data.adultPriceGross,
+              vatRate: refreshData.data.vatRate,
+              promptPayTarget: refreshData.data.promptPayTarget,
+            });
           }
         }
       } else {
@@ -377,47 +400,36 @@ export default function SettingsPage() {
             </CardHeader>
             <CardBody className="space-y-6">
               <div>
-                <label htmlFor="promptPayPhone" className="block text-sm font-medium text-gray-700 mb-2">
-                  เบอร์โทรสำหรับ PromptPay (เบอร์ร้าน)
+                <label htmlFor="promptPayTarget" className="block text-sm font-medium text-gray-700 mb-2">
+                  เบอร์โทรหรือ ID สำหรับ PromptPay (เบอร์ร้าน)
                 </label>
                 <Input
-                  id="promptPayPhone"
-                  type="tel"
-                  value={settings?.promptPayPhone || ""}
-                  onChange={(e) => handleSettingsChange("promptPayPhone", e.target.value)}
-                  placeholder="08xxxxxxxx"
+                  id="promptPayTarget"
+                  type="text"
+                  value={settings?.promptPayTarget || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '') {
+                      // Keep existing value if cleared
+                    } else {
+                      handleSettingsChange("promptPayTarget", value);
+                    }
+                  }}
+                  placeholder="0812345678 หรือ ID บัตรประชาชน"
                   startContent={<PhoneIcon className="w-4 h-4 text-gray-400" />}
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  เบอร์นี้จะใช้สำหรับสร้าง QR Code ชำระเงินของร้าน
-                </p>
-              </div>
-
-              <Divider />
-
-              <div>
-                <label htmlFor="promptPayId" className="block text-sm font-medium text-gray-700 mb-2">
-                  หมายเลขบัตรประชาชน (สำรอง)
-                </label>
-                <Input
-                  id="promptPayId"
-                  type="text"
-                  value={settings?.promptPayId || ""}
-                  onChange={(e) => handleSettingsChange("promptPayId", e.target.value)}
-                  placeholder="1-XXXXX-XXXXXX-XX-X"
-                  startContent={<IdentificationIcon className="w-4 h-4 text-gray-400" />}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  ใช้เป็นตัวเลือกสำรองหากเบอร์โทรไม่สามารถใช้งานได้
+                  ใส่เบอร์โทรหรือ ID บัตรประชาชนสำหรับสร้าง QR Code ชำระเงินของร้าน<br />
+                  หากไม่ตั้งค่า ระบบจะใช้ค่าเริ่มต้น
                 </p>
               </div>
 
               <div className="pt-4">
                 <p className="text-sm text-gray-600 mb-2">หมายเหตุ:</p>
                 <ul className="text-xs text-gray-500 space-y-1">
-                  <li>• เบอร์โทรจะเป็นตัวหลักสำหรับ PromptPay QR</li>
-                  <li>• หากไม่ตั้งค่า จะใช้เบอร์ลูกค้าแทน</li>
-                  <li>• ระบบจะตรวจสอบเบอร์ก่อนสร้าง QR Code</li>
+                  <li>• ใช้เบอร์โทร (08xxxxxxxx) หรือ ID บัตรประชาชน</li>
+                  <li>• ค่านี้จะใช้ใน QR Code ชำระเงินทุกบิล</li>
+                  <li>• หากไม่ตั้งค่า จะใช้ค่าเริ่มต้น 0812345678</li>
                 </ul>
               </div>
             </CardBody>

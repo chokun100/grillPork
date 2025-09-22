@@ -82,7 +82,7 @@ export function validateOpenBillRequest(data: any): ValidationResult {
   }
 }
 
-export function validatePayCashRequest(data: any): ValidationResult {
+export function validatePayRequest(data: any): ValidationResult {
   const errors: ValidationError[] = []
 
   if (data.amount === undefined || data.amount === null) {
@@ -91,8 +91,8 @@ export function validatePayCashRequest(data: any): ValidationResult {
     errors.push({ field: 'amount', message: 'Amount must be a positive number' })
   }
 
-  if (data.method !== 'CASH') {
-    errors.push({ field: 'method', message: 'Only CASH payment method is supported' })
+  if (data.method && !['CASH', 'PROMPTPAY'].includes(data.method)) {
+    errors.push({ field: 'method', message: 'Method must be CASH or PROMPTPAY' })
   }
 
   return {
@@ -122,6 +122,37 @@ export function validatePromotion(data: any): ValidationResult {
     errors.push({ field: 'value', message: 'Promotion value must be positive' })
   }
 
+  if (data.expiresAt !== undefined && data.expiresAt !== null) {
+    const date = new Date(data.expiresAt)
+    if (isNaN(date.getTime())) {
+      errors.push({ field: 'expiresAt', message: 'Invalid date format. Must be ISO date string' })
+    } else if (date <= new Date()) {
+      errors.push({ field: 'expiresAt', message: 'Expiration date must be in the future' })
+    }
+  }
+
+  if (data.conditions !== undefined && data.conditions !== null) {
+    if (typeof data.conditions !== 'object' || Array.isArray(data.conditions)) {
+      errors.push({ field: 'conditions', message: 'Conditions must be an object' })
+    } else {
+      // Validate specific condition fields, e.g., for buy X pay Y
+      if (data.conditions.minAdults !== undefined) {
+        if (!Number.isInteger(data.conditions.minAdults) || data.conditions.minAdults <= 0) {
+          errors.push({ field: 'conditions.minAdults', message: 'minAdults must be a positive integer' })
+        }
+      }
+      if (data.conditions.payAdults !== undefined) {
+        if (!Number.isInteger(data.conditions.payAdults) || data.conditions.payAdults <= 0) {
+          errors.push({ field: 'conditions.payAdults', message: 'payAdults must be a positive integer' })
+        }
+        // Ensure payAdults < minAdults if both present
+        if (data.conditions.minAdults !== undefined && data.conditions.payAdults >= data.conditions.minAdults) {
+          errors.push({ field: 'conditions.payAdults', message: 'payAdults must be less than minAdults' })
+        }
+      }
+    }
+  }
+
   if (data.daysOfWeek && Array.isArray(data.daysOfWeek)) {
     const validDays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
     for (let i = 0; i < data.daysOfWeek.length; i++) {
@@ -133,6 +164,10 @@ export function validatePromotion(data: any): ValidationResult {
         })
       }
     }
+  }
+
+  if (data.active !== undefined && typeof data.active !== 'boolean') {
+    errors.push({ field: 'active', message: 'Active must be a boolean' })
   }
 
   return {
@@ -221,32 +256,31 @@ export function validateLogin(data: any): ValidationResult {
 export function validateSettings(data: any): ValidationResult {
   const errors: ValidationError[] = []
 
-  if (data.adultPriceGross === undefined || data.adultPriceGross === null) {
-    errors.push({ field: 'adultPriceGross', message: 'Adult price is required' })
-  } else if (typeof data.adultPriceGross !== 'number' || data.adultPriceGross <= 0) {
-    errors.push({ field: 'adultPriceGross', message: 'Adult price must be positive' })
-  }
-
-  if (!data.currency || typeof data.currency !== 'string') {
-    errors.push({ field: 'currency', message: 'Currency is required' })
-  }
-
-  if (data.vatRate !== undefined && data.vatRate !== null) {
-    if (typeof data.vatRate !== 'number' || data.vatRate < 0 || data.vatRate > 1) {
-      errors.push({ field: 'vatRate', message: 'VAT rate must be between 0 and 1' })
+  // Optional validation for PATCH - only validate provided fields
+  if (data.adultPriceGross !== undefined) {
+    if (data.adultPriceGross === null) {
+      errors.push({ field: 'adultPriceGross', message: 'Adult price cannot be null' })
+    } else if (typeof data.adultPriceGross !== 'number' || data.adultPriceGross <= 0) {
+      errors.push({ field: 'adultPriceGross', message: 'Adult price must be positive number' })
     }
   }
 
-  if (data.locales && Array.isArray(data.locales)) {
-    const validLocales = ['th', 'en']
-    for (let i = 0; i < data.locales.length; i++) {
-      const locale = data.locales[i]
-      if (!validLocales.includes(locale)) {
-        errors.push({
-          field: `locales[${i}]`,
-          message: `Invalid locale. Valid locales are: ${validLocales.join(', ')}`
-        })
+  if (data.vatRate !== undefined) {
+    if (data.vatRate === null) {
+      // Allow null for vatRate if explicitly set
+    } else {
+      const vatRateNum = typeof data.vatRate === 'string' ? parseFloat(data.vatRate) : data.vatRate;
+      if (isNaN(vatRateNum) || vatRateNum < 0 || vatRateNum > 1) {
+        errors.push({ field: 'vatRate', message: 'VAT rate must be between 0 and 1' })
       }
+    }
+  }
+
+  if (data.promptPayTarget !== undefined) {
+    if (data.promptPayTarget === null || data.promptPayTarget === '') {
+      // Allow null or empty to clear the field
+    } else if (typeof data.promptPayTarget !== 'string' || data.promptPayTarget.trim() === '') {
+      errors.push({ field: 'promptPayTarget', message: 'promptPayTarget must be a valid string' })
     }
   }
 
