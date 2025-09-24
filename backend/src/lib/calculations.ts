@@ -7,14 +7,11 @@ export interface PricingInput {
   vatRate: Decimal
   discountType?: 'NONE' | 'PERCENT' | 'AMOUNT'
   discountValue?: Decimal
-  promotionDiscount?: Decimal
   loyaltyFreeApplied?: boolean
 }
 
 export interface PricingResult {
   baseGross: Decimal
-  promoGrossDiscount: Decimal
-  afterPromoGross: Decimal
   loyaltyFree: Decimal
   discountedGross: Decimal
   subtotalGross: Decimal
@@ -31,7 +28,6 @@ export function calculateBillPricing(input: PricingInput): PricingResult {
     vatRate,
     discountType = 'NONE',
     discountValue = new Decimal(0),
-    promotionDiscount = new Decimal(0),
     loyaltyFreeApplied = false
   } = input
 
@@ -39,13 +35,9 @@ export function calculateBillPricing(input: PricingInput): PricingResult {
   const adultPayingCount = adultCount
   const baseGross = new Decimal(adultPayingCount).mul(adultPriceGross)
 
-  // Apply promotion discount (e.g., weekend 10% off)
-  const promoGrossDiscount = promotionDiscount
-  const afterPromoGross = baseGross.sub(promoGrossDiscount)
-
   // Apply loyalty free (1 adult free after 10 stamps)
   const loyaltyFree = loyaltyFreeApplied ? adultPriceGross : new Decimal(0)
-  const afterLoyaltyGross = afterPromoGross.sub(loyaltyFree)
+  const afterLoyaltyGross = baseGross.sub(loyaltyFree)
 
   // Apply manual discount if provided
   let discountedGross = afterLoyaltyGross
@@ -65,8 +57,6 @@ export function calculateBillPricing(input: PricingInput): PricingResult {
 
   return {
     baseGross,
-    promoGrossDiscount,
-    afterPromoGross,
     loyaltyFree,
     discountedGross,
     subtotalGross,
@@ -74,24 +64,6 @@ export function calculateBillPricing(input: PricingInput): PricingResult {
     totalGross,
     adultPayingCount
   }
-}
-
-export function calculateWeekendPromotion(
-  baseGross: Decimal,
-  daysOfWeek: string[],
-  currentDay: string
-): { discount: Decimal; applied: boolean } {
-  const weekendDays = ['SAT', 'SUN']
-  const isWeekend = weekendDays.includes(currentDay)
-  const isPromotionDay = daysOfWeek.includes(currentDay)
-
-  if (isWeekend && isPromotionDay) {
-    // 10% discount on weekends
-    const discount = baseGross.mul(0.1)
-    return { discount, applied: true }
-  }
-
-  return { discount: new Decimal(0), applied: false }
 }
 
 export function calculateLoyaltyRedemption(

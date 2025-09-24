@@ -35,10 +35,7 @@ enum DiscountType {
   AMOUNT
 }
 
-enum PromoType {
-  PERCENT
-  AMOUNT
-}
+
 
 model User {
   id        String   @id @default(cuid())
@@ -106,13 +103,13 @@ model Bill {
   closedBy            User?         @relation("ClosedBy", fields: [closedById], references: [id])
   customerId          String?
   customer            Customer?     @relation(fields: [customerId], references: [id])
+  
   status              BillStatus    @default(OPEN)
   adultCount          Int
   childCount          Int
   adultPriceGross     Decimal       @db.Decimal(10,2)
   discountType        DiscountType  @default(NONE)
   discountValue       Decimal       @db.Decimal(10,2) @default(0)
-  promoApplied        String?
   loyaltyFreeApplied  Boolean       @default(false)
   subtotalGross       Decimal       @db.Decimal(10,2)
   vatAmount           Decimal       @db.Decimal(10,2)
@@ -130,19 +127,7 @@ model Bill {
   @@index([status])
 }
 
-model Promotion {
-  id         String     @id @default(cuid())
-  key        String     @unique
-  name       String
-  type       PromoType
-  value      Decimal    @db.Decimal(10,2)
-  expiresAt  DateTime?
-  conditions Json?
-  daysOfWeek String[]
-  active     Boolean    @default(true)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-}
+
 
 model Settings {
   id            String   @id @default("singleton")

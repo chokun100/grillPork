@@ -118,26 +118,7 @@ async function seed() {
       }
     }
 
-    // Create weekend promotion
-    const weekendPromotion = await prisma.promotion.findFirst({
-      where: { key: 'WEEKEND_10_OFF' }
-    })
-
-    if (!weekendPromotion) {
-      await prisma.promotion.create({
-        data: {
-          key: 'WEEKEND_10_OFF',
-          name: 'Weekend 10% Off',
-          type: 'PERCENT',
-          value: new Decimal(10),
-          daysOfWeek: ['SAT', 'SUN'],
-          active: true
-        }
-      })
-      console.log('✅ Created weekend promotion')
-    } else {
-      console.log('ℹ️  Weekend promotion already exists')
-    }
+    
 
     // Create settings if not exists
     const settings = await prisma.settings.findUnique({

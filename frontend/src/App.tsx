@@ -4,7 +4,6 @@ import IndexPage from "@/pages/index";
 import TablesPage from "@/pages/tables";
 import BillsPage from "@/pages/bills";
 import CustomersPage from "@/pages/customers";
-import PromotionsPage from "@/pages/promotions";
 import ReportsPage from "@/pages/reports";
 import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/users";
@@ -49,14 +48,6 @@ function App() {
           element={
             <ProtectedRoute>
               <CustomersPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/promotions"
-          element={
-            <ProtectedRoute>
-              <PromotionsPage />
             </ProtectedRoute>
           }
         />

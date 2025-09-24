@@ -15,7 +15,9 @@ import {
   ModalFooter,
   Input,
   Divider,
-  useDisclosure
+  useDisclosure,
+  Select,
+  SelectItem,
 } from "@heroui/react";
 import {
   RectangleStackIcon,
@@ -60,7 +62,7 @@ interface Bill {
   adultPriceGross: number;
   discountType: "NONE" | "PERCENT" | "AMOUNT";
   discountValue: number;
-  promoApplied?: string;
+  
   loyaltyFreeApplied: boolean;
   subtotalGross: number;
   vatAmount: number;
@@ -128,6 +130,8 @@ export default function TablesPage() {
   const [promptPayTarget, setPromptPayTarget] = useState<string>('');
   const [generatingPaymentQR, setGeneratingPaymentQR] = useState(false);
   const [confirmingPromptPay, setConfirmingPromptPay] = useState(false);
+
+  // No promotion functionality (removed)
   
   // Modal states
   const { isOpen: isDetailsModalOpen, onOpen: onDetailsModalOpen, onClose: onDetailsModalClose } = useDisclosure();
@@ -214,6 +218,8 @@ export default function TablesPage() {
 
     fetchSettings();
   }, [token]);
+
+  
 
   // Calculate pricing preview
   useEffect(() => {
@@ -509,6 +515,8 @@ export default function TablesPage() {
       }
     }
   };
+
+  
 
   const handleGeneratePaymentQR = async (bill: Bill) => {
     try {
@@ -953,12 +961,7 @@ export default function TablesPage() {
                                   {bill.paidAmount > 0 ? formatCurrency(bill.paidAmount) : '-'}
                                 </span>
                               </div>
-                              {bill.promoApplied && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-600">โปรโมชั่น:</span>
-                                  <span className="text-green-600 font-medium">ใช้งานแล้ว</span>
-                                </div>
-                              )}
+                              
                               {bill.loyaltyFreeApplied && (
                                 <div className="flex justify-between">
                                   <span className="text-gray-600">แลกแต้ม:</span>

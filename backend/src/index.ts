@@ -9,7 +9,6 @@ import users from './routes/users'
 import auth from './routes/auth'
 import tables from './routes/tables'
 import tableOpen from './routes/table-open'
-import promotions from './routes/promotions'
 import bills from './routes/bills'
 import customers from './routes/customers'
 import reports from './routes/reports'
@@ -66,7 +65,6 @@ app.get('/', (c) => {
       users: '/api/users',
       auth: '/api/auth',
       tables: '/api/tables',
-      promotions: '/api/promotions',
       bills: '/api/bills',
       customers: '/api/customers',
       reports: '/api/reports',
@@ -84,9 +82,7 @@ app.get('/health', (c) => {
 app.route('/api/settings', settings)
 app.route('/api/users', users)
 app.route('/api/auth', auth)
-app.route('/api/tables', tables)
-app.route('/api', tableOpen)
-app.route('/api/promotions', promotions)
+app.route('/api/tables', tables)  // This now includes the open endpoint
 app.route('/api/bills', bills)
 app.route('/api/customers', customers)
 app.route('/api/reports', reports)

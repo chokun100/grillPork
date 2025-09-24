@@ -15,14 +15,30 @@ reports.get('/daily',
   async (c) => {
     try {
       const dateParam = c.req.query('date')
-      const reportDate = dateParam ? new Date(dateParam) : new Date()
+      let reportDate = new Date()
       
-      // Set time to start and end of day
+      if (dateParam) {
+        // Parse the date parameter properly
+        reportDate = new Date(dateParam)
+        
+        // Validate the date
+        if (isNaN(reportDate.getTime())) {
+          return c.json({ 
+            ok: false, 
+            error: { 
+              code: 'INVALID_DATE', 
+              message: 'Invalid date format. Please use YYYY-MM-DD format.' 
+            } 
+          }, 400)
+        }
+      }
+      
+      // Set time to start and end of day (UTC time to avoid timezone issues)
       const startOfDay = new Date(reportDate)
-      startOfDay.setHours(0, 0, 0, 0)
+      startOfDay.setUTCHours(0, 0, 0, 0)
       
       const endOfDay = new Date(reportDate)
-      endOfDay.setHours(23, 59, 59, 999)
+      endOfDay.setUTCHours(23, 59, 59, 999)
 
       // Get bills for the day
       const bills = await prisma.bill.findMany({
@@ -77,25 +93,56 @@ reports.get('/daily',
         ? totalSales / closedBills.length 
         : 0
 
-      // Hourly breakdown
-      const hourlyData = await prisma.$queryRaw<Array<{
-        hour: number
+      // Hourly breakdown - using Prisma ORM instead of raw SQL to avoid compatibility issues
+      const allClosedBills = await prisma.bill.findMany({
+        where: {
+          openedAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          },
+          status: 'CLOSED'
+        },
+        select: {
+          totalGross: true,
+          adultCount: true,
+          childCount: true,
+          openedAt: true
+        }
+      })
+
+      // Group bills by hour and calculate metrics
+      const hourlyMap = new Map<number, {
         sales: number
         bills: number
         customers: number
-      }>>`
-        SELECT 
-          EXTRACT(HOUR FROM "openedAt") as hour,
-          SUM("totalGross")::float as sales,
-          COUNT(*)::int as bills,
-          SUM("adultCount" + "childCount")::int as customers
-        FROM "Bill"
-        WHERE "openedAt" >= ${startOfDay} 
-          AND "openedAt" <= ${endOfDay}
-          AND "status" = 'CLOSED'
-        GROUP BY EXTRACT(HOUR FROM "openedAt")
-        ORDER BY hour
-      `
+      }>()
+
+      for (const bill of allClosedBills) {
+        const hour = new Date(bill.openedAt).getUTCHours()
+        
+        if (!hourlyMap.has(hour)) {
+          hourlyMap.set(hour, {
+            sales: 0,
+            bills: 0,
+            customers: 0
+          })
+        }
+        
+        const hourData = hourlyMap.get(hour)!
+        hourData.sales += bill.totalGross.toNumber()
+        hourData.bills += 1
+        hourData.customers += bill.adultCount + bill.childCount
+      }
+
+      // Convert to array and sort by hour
+      const hourlyData = Array.from(hourlyMap.entries())
+        .map(([hour, data]) => ({
+          hour,
+          sales: data.sales,
+          bills: data.bills,
+          customers: data.customers
+        }))
+        .sort((a, b) => a.hour - b.hour)
 
       // Get payment methods breakdown
       const paymentMethods = await prisma.bill.groupBy({
@@ -116,27 +163,6 @@ reports.get('/daily',
         }
       })
 
-      // Get promotion usage
-      const promotionUsage = await prisma.bill.groupBy({
-        by: ['promoApplied'],
-        where: {
-          openedAt: {
-            gte: startOfDay,
-            lte: endOfDay
-          },
-          status: 'CLOSED',
-          promoApplied: {
-            not: null
-          }
-        },
-        _sum: {
-          totalGross: true
-        },
-        _count: {
-          id: true
-        }
-      })
-
       // Get loyalty usage
       const loyaltyUsage = await prisma.bill.count({
         where: {
@@ -149,8 +175,8 @@ reports.get('/daily',
         }
       })
 
-      return c.json({ 
-        ok: true, 
+      return c.json({
+        ok: true,
         data: {
           date: reportDate.toISOString().split('T')[0],
           summary: {
@@ -174,11 +200,6 @@ reports.get('/daily',
             totalAmount: method._sum.totalGross?.toNumber() || 0,
             paidAmount: method._sum.paidAmount?.toNumber() || 0,
             transactionCount: method._count.id
-          })),
-          promotionUsage: promotionUsage.map(promo => ({
-            promotion: promo.promoApplied,
-            totalSales: promo._sum.totalGross?.toNumber() || 0,
-            usageCount: promo._count.id
           }))
         }
       })
@@ -201,11 +222,38 @@ reports.get('/monthly',
   async (c) => {
     try {
       const monthParam = c.req.query('month') // YYYY-MM format
-      const targetMonth = monthParam || new Date().toISOString().slice(0, 7)
+      let targetMonth = new Date().toISOString().slice(0, 7)
+      
+      if (monthParam) {
+        // Validate month format (YYYY-MM)
+        const monthRegex = /^\d{4}-\d{2}$/
+        if (!monthRegex.test(monthParam)) {
+          return c.json({ 
+            ok: false, 
+            error: { 
+              code: 'INVALID_MONTH', 
+              message: 'Invalid month format. Please use YYYY-MM format.' 
+            } 
+          }, 400)
+        }
+        
+        const [year, month] = monthParam.split('-').map(Number)
+        if (year < 1970 || year > 2100 || month < 1 || month > 12) {
+          return c.json({ 
+            ok: false, 
+            error: { 
+              code: 'INVALID_MONTH', 
+              message: 'Invalid month values. Please use valid year and month.' 
+            } 
+          }, 400)
+        }
+        
+        targetMonth = monthParam
+      }
       
       const [year, month] = targetMonth.split('-').map(Number)
-      const startDate = new Date(year, month - 1, 1)
-      const endDate = new Date(year, month, 0, 23, 59, 59, 999)
+      const startDate = new Date(Date.UTC(year, month - 1, 1))
+      const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
 
       // Get monthly data
       const monthlyData = await prisma.bill.groupBy({

@@ -3,7 +3,7 @@ import { dualAuth, requireScopes } from '../middleware/auth'
 import { errorHandler } from '../middleware/validation'
 import prisma from '../lib/db'
 import { Decimal } from '@prisma/client/runtime/library'
-import { calculateBillPricing, calculateWeekendPromotion, getCurrentDayOfWeek } from '../lib/calculations'
+import { calculateBillPricing, getCurrentDayOfWeek } from '../lib/calculations'
 import { validateOpenBillRequest, validatePayRequest } from '../lib/validation'
 import { generateTableQRCode } from '../lib/qr'
 import * as promptpayQR from 'promptpay-qr'
@@ -196,39 +196,13 @@ bills.patch('/:id',
 
       // Check for valid discount types
       if (!['NONE', 'PERCENT', 'AMOUNT'].includes(discountType)) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'VALIDATION_ERROR', 
-            message: 'Invalid discount type' 
-          } 
+        return c.json({
+          ok: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid discount type'
+          }
         }, 400)
-      }
-
-      // Calculate promotion discount if applicable
-      let promotionDiscount = new Decimal(0)
-      let promoApplied = null
-
-      if (!currentBill.loyaltyFreeApplied) {
-        const activePromotions = await prisma.promotion.findMany({
-          where: { 
-            active: true,
-            daysOfWeek: { has: getCurrentDayOfWeek() }
-          }
-        })
-
-        if (activePromotions.length > 0) {
-          const promotion = activePromotions[0]
-          const baseAmount = new Decimal(adultCount).mul(settings.adultPriceGross)
-          
-          if (promotion.type === 'PERCENT') {
-            promotionDiscount = baseAmount.mul(promotion.value).div(100)
-          } else if (promotion.type === 'AMOUNT') {
-            promotionDiscount = promotion.value
-          }
-          
-          promoApplied = promotion.key
-        }
       }
 
       // Calculate pricing
@@ -239,7 +213,6 @@ bills.patch('/:id',
         vatRate: settings.vatRate,
         discountType: discountType as 'NONE' | 'PERCENT' | 'AMOUNT',
         discountValue,
-        promotionDiscount,
         loyaltyFreeApplied: currentBill.loyaltyFreeApplied
       })
 
@@ -252,7 +225,6 @@ bills.patch('/:id',
           adultPriceGross: settings.adultPriceGross,
           discountType: discountType as any,
           discountValue,
-          promoApplied,
           subtotalGross: pricingResult.subtotalGross,
           vatAmount: pricingResult.vatAmount,
           totalGross: pricingResult.totalGross,
@@ -290,136 +262,6 @@ bills.patch('/:id',
   }
 )
 
-// Apply weekend promotion
-bills.post('/:id/apply-promo',
-  requireScopes(['cashier:*', 'admin:*']),
-  async (c) => {
-    try {
-      const billId = c.req.param('id')
-      
-      const bill = await prisma.bill.findUnique({
-        where: { id: billId },
-        include: {
-          table: true
-        }
-      })
-
-      if (!bill) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NOT_FOUND', 
-            message: 'Bill not found' 
-          } 
-        }, 404)
-      }
-
-      if (bill.status !== 'OPEN') {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'INVALID_STATE', 
-            message: 'Cannot apply promotion to closed or void bill' 
-          } 
-        }, 400)
-      }
-
-      if (bill.loyaltyFreeApplied) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'INVALID_STATE', 
-            message: 'Cannot apply promotion when loyalty free is already applied' 
-          } 
-        }, 400)
-      }
-
-      // Get settings
-      const settings = await prisma.settings.findUnique({
-        where: { id: 'singleton' }
-      })
-
-      if (!settings) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NOT_FOUND', 
-            message: 'Settings not found' 
-          } 
-        }, 500)
-      }
-
-      // Check for active promotions
-      const activePromotions = await prisma.promotion.findMany({
-        where: { 
-          active: true,
-          daysOfWeek: { has: getCurrentDayOfWeek() }
-        }
-      })
-
-      if (activePromotions.length === 0) {
-        return c.json({ 
-          ok: false, 
-          error: { 
-            code: 'NO_PROMOTION', 
-            message: 'No active promotions available today' 
-          } 
-        }, 400)
-      }
-
-      const promotion = activePromotions[0]
-      const baseAmount = new Decimal(bill.adultCount).mul(settings.adultPriceGross)
-      
-      let promotionDiscount = new Decimal(0)
-      if (promotion.type === 'PERCENT') {
-        promotionDiscount = baseAmount.mul(promotion.value).div(100)
-      } else if (promotion.type === 'AMOUNT') {
-        promotionDiscount = promotion.value
-      }
-
-      // Recalculate pricing with promotion
-      const pricingResult = calculateBillPricing({
-        adultCount: bill.adultCount,
-        childCount: bill.childCount,
-        adultPriceGross: settings.adultPriceGross,
-        vatRate: settings.vatRate,
-        discountType: bill.discountType as 'NONE' | 'PERCENT' | 'AMOUNT',
-        discountValue: bill.discountValue,
-        promotionDiscount,
-        loyaltyFreeApplied: bill.loyaltyFreeApplied
-      })
-
-      // Update bill
-      const updatedBill = await prisma.bill.update({
-        where: { id: billId },
-        data: {
-          promoApplied: promotion.key,
-          subtotalGross: pricingResult.subtotalGross,
-          vatAmount: pricingResult.vatAmount,
-          totalGross: pricingResult.totalGross
-        }
-      })
-
-      return c.json({ 
-        ok: true, 
-        data: {
-          bill: updatedBill,
-          promotionApplied: promotion.name,
-          discountAmount: promotionDiscount
-        }
-      })
-    } catch (error) {
-      console.error('Apply promotion error:', error)
-      return c.json({ 
-        ok: false, 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: 'Failed to apply promotion' 
-        } 
-      }, 500)
-    }
-  }
-)
 
 // Apply loyalty redemption
 bills.post('/:id/apply-loyalty',
@@ -509,7 +351,6 @@ bills.post('/:id/apply-loyalty',
         vatRate: settings.vatRate,
         discountType: bill.discountType as 'NONE' | 'PERCENT' | 'AMOUNT',
         discountValue: bill.discountValue,
-        promotionDiscount: new Decimal(0),
         loyaltyFreeApplied: true
       })
 

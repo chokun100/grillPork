@@ -4,6 +4,8 @@ export type IconSvgProps = SVGProps<SVGSVGElement> & {
   size?: number;
 };
 
+
+
 export interface Bill {
   id: string;
   status: "OPEN" | "CLOSED" | "VOID";
@@ -12,7 +14,6 @@ export interface Bill {
   adultPriceGross: number;
   discountType: "NONE" | "PERCENT" | "AMOUNT";
   discountValue: number;
-  promoApplied?: string;
   loyaltyFreeApplied: boolean;
   subtotalGross: number;
   vatAmount: number;
@@ -42,24 +43,5 @@ export interface Bill {
     name: string;
     role: string;
   };
+  
 }
-
-export interface Promotion {
-  id: string;
-  key: string;
-  name: string;
-  type: "PERCENT" | "AMOUNT";
-  value: number;
-  expiresAt?: string | null;
-  conditions?: {
-    minAdults?: number;
-    payAdults?: number;
-    // Add more condition types as needed
-  } | null;
-  daysOfWeek?: ("MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN")[];
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type PromoType = "PERCENT" | "AMOUNT";
